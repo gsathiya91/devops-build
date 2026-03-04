@@ -3,4 +3,4 @@ services:
   web:
     image: devops-build-app
     ports:
-      - "3000:3000"
+      - "80:80"
