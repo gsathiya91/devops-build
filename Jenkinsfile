@@ -1,75 +1,87 @@
 pipeline {
-    agent any
-
-    environment {
-        DEV_IMAGE  = "sathiyagph/devops-app-dev"
-        PROD_IMAGE = "sathiyagph/devops-app-prod"
-        APP_SERVER = "3.110.177.37"
+  agent any
+ 
+  environment {
+    IMAGE_NAME = "ecom-app"
+    DEV_REPO   = "pranathi20222/ecomm_publicrepo"
+    PROD_REPO  = "pranathi20222/ecomm_privaterepo"
+  }
+ 
+  stages {
+ 
+    stage('Checkout') {
+      steps {
+        checkout scm
+      }
     }
-
-    stages {
-
-        stage('Clone Repo') {
-            steps {
-                git branch: "${env.BRANCH_NAME}",
-                url: 'https://github.com/gsathiya91/devops-build.git'
-            }
+ 
+    stage('Build Docker Image') {
+      steps {
+        script {
+          echo "Building Docker image for branch: ${env.BRANCH_NAME}"
+ 
+          if (env.BRANCH_NAME == 'dev') {
+            sh "docker build -t ${IMAGE_NAME}:dev ."
+          }
+ 
+          if (env.BRANCH_NAME == 'master') {
+            sh "docker build -t ${IMAGE_NAME}:prod ."
+          }
         }
-
-        stage('Build Docker Image') {
-            steps {
-                sh 'docker build -t devops-app .'
-            }
-        }
-
-        stage('Login DockerHub') {
-            steps {
-                withCredentials([usernamePassword(
-                    credentialsId: 'dockerhub-creds',
-                    usernameVariable: 'USER',
-                    passwordVariable: 'PASS'
-                )]) {
-                    sh 'echo $PASS | docker login -u $USER --password-stdin'
-                }
-            }
-        }
-
-        stage('Push DEV Image') {
-            when { branch 'dev' }
-            steps {
-                sh '''
-                docker tag devops-app $DEV_IMAGE:latest
-                docker push $DEV_IMAGE:latest
-                '''
-            }
-        }
-
-        stage('Push PROD Image') {
-            when { branch 'master' }
-            steps {
-                sh '''
-                docker tag devops-app $PROD_IMAGE:latest
-                docker push $PROD_IMAGE:latest
-                '''
-            }
-        }
-
-        stage('Deploy to App Server') {
-            when { branch 'dev' }
-            steps {
-                sshagent(['ec2-deploy-key']) {
-                    sh '''
-                    ssh -o StrictHostKeyChecking=no ubuntu@$APP_SERVER "
-                    docker pull $DEV_IMAGE:latest &&
-                    docker stop devops-container || true &&
-                    docker rm devops-container || true &&
-                    docker run -d -p 80:80 --name devops-container $DEV_IMAGE:latest
-                    "
-                    '''
-                }
-            }
-        }
-
+      }
     }
-    
+ 
+    stage('Docker Login & Push Image') {
+      steps {
+        script {
+          withCredentials([
+            usernamePassword(
+              credentialsId: 'dockercreds',
+              usernameVariable: 'DOCKER_USER',
+              passwordVariable: 'DOCKER_PASS'
+            )
+          ]) {
+ 
+            sh '''
+              echo "$DOCKER_PASS" | docker login -u "$DOCKER_USER" --password-stdin
+            '''
+ 
+            if (env.BRANCH_NAME == 'dev') {
+              sh """
+                docker tag ${IMAGE_NAME}:dev ${DEV_REPO}:dev
+                docker push ${DEV_REPO}:dev
+              """
+            }
+ 
+            if (env.BRANCH_NAME == 'master') {
+              sh """
+                docker tag ${IMAGE_NAME}:prod ${PROD_REPO}:latest
+                docker push ${PROD_REPO}:latest
+              """
+            }
+          }
+        }
+      }
+    }
+ 
+    stage('Deploy to Server') {
+      when {
+        branch 'master'
+      }
+      steps {
+        sh """
+          ./deploy.sh ${PROD_REPO} latest
+        """
+      }
+    }
+  }
+ 
+  post {
+    success {
+      echo "✅ Pipeline SUCCESS for branch: ${env.BRANCH_NAME}"
+    }
+    failure {
+      echo "❌ Pipeline FAILED for branch: ${env.BRANCH_NAME}"
+    }
+  }
 }
