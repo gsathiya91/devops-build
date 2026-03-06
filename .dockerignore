@@ -1,0 +1,4 @@
+node_modules
+.git
+scripts/build.sh
+scripts/deploy.sh
